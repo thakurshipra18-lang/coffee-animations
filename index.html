@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sattva Sip</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #1a0f06;
+      -webkit-tap-highlight-color: transparent;
+    }
+    canvas { display: block; position: fixed; top: 0; left: 0; }
+
+    /* ============ RESPONSIVE TEXT OVERLAY ============ */
+    #text-overlay {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10;
+      pointer-events: none;
+      text-align: center;
+      perspective: 1000px;
+      width: 100%;
+      max-width: 90vw;
+    }
+    .title-3d {
+      font-family: Georgia, 'Playfair Display', serif;
+      font-weight: 700;
+      color: #f4e4c1;
+      text-shadow:
+        0 1px 0 #c9b48a,
+        0 2px 0 #b59f72,
+        0 3px 0 #9c875c,
+        0 4px 6px rgba(0,0,0,0.6),
+        0 0 20px rgba(255, 200, 100, 0.3);
+      letter-spacing: 0.08em;
+      line-height: 1;
+      transform-style: preserve-3d;
+    }
+    .sattva, .sip {
+      display: block;
+    }
+
+    /* MOBILE (default) — phones 320px to 600px */
+    .sattva { font-size: 64px; }
+    .sip { font-size: 64px; font-style: italic; margin-top: 0.1em; opacity: 0.92; }
+
+    /* TABLET — 601px to 1024px */
+    @media (min-width: 601px) and (max-width: 1024px) {
+      .sattva { font-size: 110px; }
+      .sip { font-size: 110px; }
+    }
+
+    /* DESKTOP — 1025px and above */
+    @media (min-width: 1025px) {
+      .sattva { font-size: 140px; }
+      .sip { font-size: 140px; }
+    }
+
+    /* LARGE DESKTOP — 1600px and above */
+    @media (min-width: 1600px) {
+      .sattva { font-size: 180px; }
+      .sip { font-size: 180px; }
+    }
+
+    /* PORTRAIT PHONE — very narrow screens */
+    @media (max-width: 380px) {
+      .sattva { font-size: 52px; }
+      .sip { font-size: 52px; }
+    }
+
+    /* Subtle multi-axis drift + shake */
+    @keyframes microShake {
+      0%, 100% { transform: translate3d(0, 0, 0) rotateX(0deg) rotateY(0deg); }
+      15% { transform: translate3d(-0.5px, 0.3px, 0) rotateX(0.4deg) rotateY(-0.3deg); }
+      30% { transform: translate3d(0.4px, -0.4px, 0) rotateX(-0.3deg) rotateY(0.4deg); }
+      45% { transform: translate3d(-0.3px, 0.5px, 0) rotateX(0.3deg) rotateY(0.2deg); }
+      60% { transform: translate3d(0.5px, 0.2px, 0) rotateX(-0.4deg) rotateY(-0.2deg); }
+      75% { transform: translate3d(-0.4px, -0.3px, 0) rotateX(0.2deg) rotateY(0.3deg); }
+      90% { transform: translate3d(0.3px, 0.4px, 0) rotateX(-0.2deg) rotateY(-0.4deg); }
+    }
+    @keyframes slowBreath {
+      0%, 100% { transform: scale(1); filter: brightness(1); }
+      50% { transform: scale(1.008); filter: brightness(1.05); }
+    }
+    .title-3d {
+      animation: microShake 3.2s ease-in-out infinite, slowBreath 5s ease-in-out infinite;
+    }
+
+    /* Vignette adapts to screen size */
+    #vignette {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(10, 5, 2, 0.7) 100%);
+    }
+  </style>
+</head>
+<body>
+  <div id="text-overlay">
+    <div class="title-3d">
+      <span class="sattva">Sattva</span>
+      <span class="sip">Sip</span>
+    </div>
+  </div>
+  <div id="vignette"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+  (function() {
+    'use strict';
+
+    // ============ DETECT DEVICE TYPE ============
+    function getDeviceProfile() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const aspect = w / h;
+
+      if (w <= 600) {
+        // Mobile (phone)
+        return {
+          type: 'mobile',
+          cameraZ: 38,
+          fov: 65,
+          coffeeCount: 1500,
+          goldCount: 700,
+          particleSpread: 16,
+          windDistance: 280,
+          pixelRatioCap: 2
+        };
+      } else if (w <= 1024) {
+        // Tablet
+        return {
+          type: 'tablet',
+          cameraZ: 45,
+          fov: 55,
+          coffeeCount: 2000,
+          goldCount: 900,
+          particleSpread: 20,
+          windDistance: 340,
+          pixelRatioCap: 2
+        };
+      } else {
+        // Desktop
+        return {
+          type: 'desktop',
+          cameraZ: 50,
+          fov: 50,
+          coffeeCount: 2500,
+          goldCount: 1200,
+          particleSpread: 22,
+          windDistance: 420,
+          pixelRatioCap: 2
+        };
+      }
+    }
+
+    let profile = getDeviceProfile();
+
+    // ============ SCENE SETUP ============
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(profile.fov, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, profile.cameraZ);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, profile.pixelRatioCap));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x0a0604, 1);
+    document.body.appendChild(renderer.domElement);
+
+    // ============ GLOW BACKDROP ============
+    const glowMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `
+        varying vec2 vUv; uniform float uTime;
+        void main() {
+          float dist = distance(vUv, vec2(0.5));
+          float glow = smoothstep(0.55, 0.0, dist) * (0.85 + 0.15 * sin(uTime * 0.3));
+          vec3 inner = vec3(0.95, 0.55, 0.15);
+          vec3 mid = vec3(0.45, 0.22, 0.05);
+          vec3 outer = vec3(0.04, 0.02, 0.01);
+          vec3 color = mix(outer, mid, smoothstep(0.0, 0.4, glow));
+          color = mix(color, inner, smoothstep(0.5, 1.0, glow));
+          gl_FragColor = vec4(color, glow * 0.95);
+        }`
+    });
+    // Glow scales with screen aspect to always fill the viewport
+    const glowSize = profile.type === 'mobile' ? 100 : 140;
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(glowSize, glowSize), glowMat);
+    glow.position.z = -20;
+    scene.add(glow);
+
+    // ============ COFFEE STAIN ============
+    const stainMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { uTime: { value: 0 }, uDissolve: { value: 0 } },
+      vertexShader: `varying vec2 vUv; uniform float uTime;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          float a = hash(i), b = hash(i+vec2(1,0)), c = hash(i+vec2(0,1)), d = hash(i+vec2(1,1));
+          vec2 u = f*f*(3.0-2.0*f);
+          return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+        }
+        void main() {
+          vUv = uv;
+          vec3 pos = position;
+          pos.z += noise(uv * 4.0 + uTime * 0.15) * 0.3;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }`,
+      fragmentShader: `varying vec2 vUv; uniform float uTime; uniform float uDissolve;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          float a = hash(i), b = hash(i+vec2(1,0)), c = hash(i+vec2(0,1)), d = hash(i+vec2(1,1));
+          vec2 u = f*f*(3.0-2.0*f);
+          return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+        }
+        float fbm(vec2 p) { float v=0.0,a=0.5; for(int i=0;i<5;i++){v+=a*noise(p);p*=2.0;a*=0.5;} return v; }
+        void main() {
+          vec2 uv = vUv;
+          float distort = fbm(uv * 3.0 + uTime * 0.05) * 0.3;
+          float dist = distance(uv + vec2(distort * 0.2 - 0.1, distort * 0.15), vec2(0.5));
+          float edge = fbm(uv * 8.0 + uTime * 0.08);
+          float stainMask = smoothstep(0.45, 0.15, dist + edge * 0.15);
+          float windDir = uv.x - 0.4;
+          float dissolveThreshold = uDissolve * (1.5 + windDir);
+          stainMask *= step(dissolveThreshold, edge + uv.x * 0.5);
+          vec3 darkBrown = vec3(0.18, 0.08, 0.02);
+          vec3 midBrown = vec3(0.42, 0.20, 0.06);
+          vec3 amber = vec3(0.72, 0.42, 0.12);
+          vec3 color = mix(darkBrown, midBrown, edge);
+          color = mix(color, amber, smoothstep(0.5, 0.9, edge) * 0.6);
+          float ring1 = smoothstep(0.02, 0.0, abs(dist - 0.18));
+          float ring2 = smoothstep(0.015, 0.0, abs(dist - 0.28));
+          color = mix(color, darkBrown * 0.7, (ring1 + ring2) * 0.6);
+          gl_FragColor = vec4(color, stainMask * 0.92);
+        }`
+    });
+    // Stain scales with device profile
+    const stainSize = profile.type === 'mobile' ? 30 : (profile.type === 'tablet' ? 36 : 40);
+    const stain = new THREE.Mesh(new THREE.PlaneGeometry(stainSize, stainSize, 60, 60), stainMat);
+    stain.position.set(profile.type === 'mobile' ? 0 : 2, -1, -8);
+    scene.add(stain);
+
+    // ============ COFFEE DUST PARTICLES ============
+    const COFFEE_COUNT = profile.coffeeCount;
+    const cPos = new Float32Array(COFFEE_COUNT * 3);
+    const cVel = new Float32Array(COFFEE_COUNT * 3);
+    const cOrig = new Float32Array(COFFEE_COUNT * 3);
+    const cSize = new Float32Array(COFFEE_COUNT);
+    const cOpa = new Float32Array(COFFEE_COUNT);
+    for (let i = 0; i < COFFEE_COUNT; i++) {
+      const i3 = i * 3;
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.pow(Math.random(), 0.6) * profile.particleSpread;
+      cPos[i3] = cOrig[i3] = Math.cos(angle) * r + (Math.random() - 0.5) * 8;
+      cPos[i3+1] = cOrig[i3+1] = Math.sin(angle) * r * 0.75 + (Math.random() - 0.5) * 6;
+      cPos[i3+2] = cOrig[i3+2] = (Math.random() - 0.5) * 12;
+      cVel[i3] = 0.015 + Math.random() * 0.025;
+      cVel[i3+1] = (Math.random() - 0.4) * 0.008;
+      cVel[i3+2] = (Math.random() - 0.5) * 0.005;
+      cSize[i] = 0.08 + Math.random() * 0.18;
+      cOpa[i] = 0.5 + Math.random() * 0.5;
+    }
+    const coffeeGeo = new THREE.BufferGeometry();
+    coffeeGeo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
+    coffeeGeo.setAttribute('aSize', new THREE.BufferAttribute(cSize, 1));
+    coffeeGeo.setAttribute('aOpacity', new THREE.BufferAttribute(cOpa, 1));
+    const coffeeMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { uTime: { value: 0 }, uPixelRatio: { value: Math.min(window.devicePixelRatio, profile.pixelRatioCap) } },
+      vertexShader: `attribute float aSize; attribute float aOpacity;
+        varying float vOpacity; uniform float uPixelRatio;
+        void main() {
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPos;
+          gl_PointSize = aSize * uPixelRatio * (300.0 / -mvPos.z);
+          vOpacity = aOpacity;
+        }`,
+      fragmentShader: `varying float vOpacity;
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5;
+          float d = length(uv);
+          if (d > 0.5) discard;
+          gl_FragColor = vec4(vec3(0.22, 0.11, 0.04), smoothstep(0.5, 0.2, d) * vOpacity);
+        }`
+    });
+    const coffeePoints = new THREE.Points(coffeeGeo, coffeeMat);
+    scene.add(coffeePoints);
+
+    // ============ GOLD DUST PARTICLES ============
+    const GOLD_COUNT = profile.goldCount;
+    const gPos = new Float32Array(GOLD_COUNT * 3);
+    const gVel = new Float32Array(GOLD_COUNT * 3);
+    const gPhase = new Float32Array(GOLD_COUNT);
+    const gSize = new Float32Array(GOLD_COUNT);
+    const gOpa = new Float32Array(GOLD_COUNT);
+    for (let i = 0; i < GOLD_COUNT; i++) {
+      const i3 = i * 3;
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.pow(Math.random(), 0.5) * (profile.particleSpread * 0.85);
+      // On mobile, distribute particles more evenly around center (not biased right)
+      const xBias = profile.type === 'mobile' ? (Math.random() - 0.5) * 4 : (2 + Math.random() * 6);
+      gPos[i3] = Math.cos(angle) * r + xBias;
+      gPos[i3+1] = Math.sin(angle) * r * 0.7;
+      gPos[i3+2] = (Math.random() - 0.5) * 15;
+      gVel[i3] = 0.02 + Math.random() * 0.04;
+      gVel[i3+1] = (Math.random() - 0.3) * 0.012;
+      gVel[i3+2] = (Math.random() - 0.5) * 0.008;
+      gPhase[i] = Math.random() * Math.PI * 2;
+      gSize[i] = 0.15 + Math.random() * 0.35;
+      gOpa[i] = 0.6 + Math.random() * 0.4;
+    }
+    const goldGeo = new THREE.BufferGeometry();
+    goldGeo.setAttribute('position', new THREE.BufferAttribute(gPos, 3));
+    goldGeo.setAttribute('aSize', new THREE.BufferAttribute(gSize, 1));
+    goldGeo.setAttribute('aOpacity', new THREE.BufferAttribute(gOpa, 1));
+    goldGeo.setAttribute('aPhase', new THREE.BufferAttribute(gPhase, 1));
+    const goldMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uTime: { value: 0 }, uPixelRatio: { value: Math.min(window.devicePixelRatio, profile.pixelRatioCap) } },
+      vertexShader: `attribute float aSize; attribute float aOpacity; attribute float aPhase;
+        varying float vOpacity; varying float vTwinkle;
+        uniform float uTime; uniform float uPixelRatio;
+        void main() {
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPos;
+          gl_PointSize = aSize * uPixelRatio * (350.0 / -mvPos.z);
+          vTwinkle = 0.5 + 0.5 * sin(uTime * 2.0 + aPhase * 6.28);
+          vOpacity = aOpacity;
+        }`,
+      fragmentShader: `varying float vOpacity; varying float vTwinkle;
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5;
+          float d = length(uv);
+          if (d > 0.5) discard;
+          float core = smoothstep(0.15, 0.0, d);
+          float halo = smoothstep(0.5, 0.1, d) * 0.6;
+          float intensity = (core + halo) * vOpacity * (0.5 + vTwinkle * 0.7);
+          vec3 gold = mix(vec3(1.0, 0.78, 0.25), vec3(1.0, 0.95, 0.6), core);
+          gl_FragColor = vec4(gold, intensity);
+        }`
+    });
+    const goldPoints = new THREE.Points(goldGeo, goldMat);
+    scene.add(goldPoints);
+
+    // ============ ANIMATION LOOP ============
+    const clock = new THREE.Clock();
+    let elapsed = 0;
+    function animate() {
+      const dt = clock.getDelta();
+      elapsed += dt;
+      glowMat.uniforms.uTime.value = elapsed;
+      stainMat.uniforms.uTime.value = elapsed;
+      coffeeMat.uniforms.uTime.value = elapsed;
+      goldMat.uniforms.uTime.value = elapsed;
+      const cyclePos = (elapsed % 12) / 12;
+      let dissolve = 0;
+      if (cyclePos < 0.15) dissolve = 0;
+      else if (cyclePos < 0.75) dissolve = (cyclePos - 0.15) / 0.6;
+      else dissolve = 1 - (cyclePos - 0.75) / 0.25;
+      stainMat.uniforms.uDissolve.value = dissolve;
+      const wind = Math.max(0, Math.sin((cyclePos - 0.1) * Math.PI / 0.85)) * 0.85;
+      const cArr = coffeePoints.geometry.attributes.position.array;
+      const recycleThreshold = profile.type === 'mobile' ? 25 : 35;
+      for (let i = 0; i < COFFEE_COUNT; i++) {
+        const i3 = i * 3;
+        cArr[i3] += cVel[i3] * wind * dt * 60;
+        cArr[i3+1] += cVel[i3+1] * wind * dt * 60 + Math.sin(elapsed * 0.7 + i * 0.1) * 0.003;
+        cArr[i3+2] += cVel[i3+2] * wind * dt * 60;
+        if (cArr[i3] > recycleThreshold || cyclePos < 0.05) {
+          cArr[i3] = cOrig[i3]; cArr[i3+1] = cOrig[i3+1]; cArr[i3+2] = cOrig[i3+2];
+        }
+      }
+      coffeePoints.geometry.attributes.position.needsUpdate = true;
+      const gArr = goldPoints.geometry.attributes.position.array;
+      const goldRecycle = profile.type === 'mobile' ? 28 : 38;
+      for (let i = 0; i < GOLD_COUNT; i++) {
+        const i3 = i * 3;
+        const phase = gPhase[i];
+        const swirlX = Math.cos(elapsed * 0.4 + phase) * 0.008 * (1 - wind);
+        const swirlY = Math.sin(elapsed * 0.4 + phase) * 0.008 * (1 - wind);
+        gArr[i3] += swirlX + gVel[i3] * wind * dt * 60;
+        gArr[i3+1] += swirlY + gVel[i3+1] * wind * dt * 60 + Math.sin(elapsed * 0.8 + phase) * 0.004;
+        gArr[i3+2] += gVel[i3+2] * wind * dt * 60;
+        if (gArr[i3] > goldRecycle || cyclePos < 0.05) {
+          const angle = Math.random() * Math.PI * 2;
+          const r = Math.pow(Math.random(), 0.5) * (profile.particleSpread * 0.85);
+          const xBias = profile.type === 'mobile' ? (Math.random() - 0.5) * 4 : (2 + Math.random() * 6);
+          gArr[i3] = Math.cos(angle) * r + xBias;
+          gArr[i3+1] = Math.sin(angle) * r * 0.7;
+          gArr[i3+2] = (Math.random() - 0.5) * 15;
+        }
+      }
+      goldPoints.geometry.attributes.position.needsUpdate = true;
+      // Camera drift — gentler on mobile
+      const driftScale = profile.type === 'mobile' ? 0.2 : 0.4;
+      camera.position.x = Math.sin(elapsed * 0.15) * driftScale;
+      camera.position.y = Math.cos(elapsed * 0.12) * (driftScale * 0.6);
+      camera.lookAt(0, 0, 0);
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    // ============ RESIZE / ORIENTATION HANDLER ============
+    let resizeTimer;
+    function handleResize() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        // Re-detect device profile in case of orientation change
+        const newProfile = getDeviceProfile();
+        if (newProfile.type !== profile.type) {
+          // Major device class change — reload to re-init particle counts cleanly
+          window.location.reload();
+          return;
+        }
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.fov = newProfile.fov;
+        camera.position.z = newProfile.cameraZ;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }, 200);
+    }
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+
+    // ============ NOTIFY ADALO WEBVIEW (optional) ============
+    setTimeout(() => {
+      if (window.parent) window.parent.postMessage('animation_complete', '*');
+    }, 5000);
+  })();
+  </script>
+</body>
+</html>
